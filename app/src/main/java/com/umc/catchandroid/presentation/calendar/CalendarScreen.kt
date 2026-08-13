@@ -1,6 +1,7 @@
 package com.umc.catchandroid.presentation.calendar
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -39,11 +41,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.umc.catchandroid.presentation.component.NotificationBellIcon
 import com.umc.catchandroid.presentation.home.NoticeItem
 import com.umc.catchandroid.ui.theme.CatchDeadlineSoon
-import com.umc.catchandroid.ui.theme.CatchInactive
+import com.umc.catchandroid.ui.theme.CatchDivider
 import com.umc.catchandroid.ui.theme.CatchPrimary
 import com.umc.catchandroid.ui.theme.CatchTextBody
 import com.umc.catchandroid.ui.theme.CatchTextCaption
 import com.umc.catchandroid.ui.theme.CatchTextTitle
+import java.time.LocalDate
 import java.time.YearMonth
 
 data class CalendarDay(
@@ -53,6 +56,7 @@ data class CalendarDay(
 )
 
 private val weekDays = listOf("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa")
+private val CalendarGridBorder = Color(0xFFE5E7EB)
 
 @Composable
 fun CalendarScreen(
@@ -66,9 +70,21 @@ fun CalendarScreen(
     val selectedDate by viewModel.selectedDate.collectAsState()
     val noticesForDate by viewModel.noticesForDate.collectAsState()
     val upcomingNotices by viewModel.upcomingNotices.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     val days = buildCalendarDays(yearMonth)
     val selectedDay = selectedDate.substringAfterLast("-").toIntOrNull() ?: 0
+    val todayStr = LocalDate.now().toString()
+
+    // 오늘(D-Day) 마감인 공지인지 판별 - 홈 화면과 동일한 빨간 배지 표시용
+    fun isDueToday(notice: com.umc.catchandroid.domain.model.Notice): Boolean {
+        val deadline = notice.deadlineAt ?: return false
+        return try {
+            deadline.substring(0, 10) == todayStr
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // 상단 앱바
@@ -87,6 +103,33 @@ fun CalendarScreen(
                 onClick = onNotificationClick,
                 modifier = Modifier.align(Alignment.CenterEnd)
             )
+        }
+
+        // 에러 배너
+        if (errorMessage != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .background(CatchDeadlineSoon.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = errorMessage ?: "",
+                    fontSize = 12.sp,
+                    color = CatchTextCaption
+                )
+                Text(
+                    text = "다시 시도",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CatchPrimary,
+                    modifier = Modifier.clickable { viewModel.retry() }
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
@@ -138,7 +181,13 @@ fun CalendarScreen(
             // 날짜 그리드
             item {
                 val weeks = days.chunked(7)
-                Column(modifier = Modifier.padding(top = 8.dp, bottom = 20.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 20.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, CalendarGridBorder, RoundedCornerShape(16.dp))
+                ) {
                     weeks.forEach { week ->
                         Row(modifier = Modifier.fillMaxWidth()) {
                             week.forEach { calDay ->
@@ -146,7 +195,9 @@ fun CalendarScreen(
                                     calDay = calDay,
                                     isSelected = calDay.isCurrentMonth && calDay.dateStr == selectedDate,
                                     hasDeadline = calDay.dateStr != null && deadlineDates.contains(calDay.dateStr),
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .border(0.5.dp, CalendarGridBorder),
                                     onClick = {
                                         calDay.dateStr?.let { viewModel.onDateSelected(it) }
                                     }
@@ -159,8 +210,13 @@ fun CalendarScreen(
 
             // 선택한 날짜 일정
             item {
+                val title = if (selectedDate == todayStr) {
+                    "오늘 일정 ${noticesForDate.size}개"
+                } else {
+                    "${yearMonth.monthValue}월 ${selectedDay}일 일정 ${noticesForDate.size}개"
+                }
                 Text(
-                    text = "📅 ${yearMonth.monthValue}월 ${selectedDay}일 일정 ${noticesForDate.size}개",
+                    text = "📅 $title",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = CatchTextTitle,
@@ -178,7 +234,11 @@ fun CalendarScreen(
                 }
             } else {
                 items(noticesForDate) { notice ->
-                    NoticeItem(notice = notice, onClick = { onNoticeClick(notice.noticeId) })
+                    NoticeItem(
+                        notice = notice,
+                        isDueToday = isDueToday(notice),
+                        onClick = { onNoticeClick(notice.noticeId) }
+                    )
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
@@ -203,7 +263,11 @@ fun CalendarScreen(
                 }
             } else {
                 items(upcomingNotices) { notice ->
-                    NoticeItem(notice = notice, onClick = { onNoticeClick(notice.noticeId) })
+                    NoticeItem(
+                        notice = notice,
+                        isDueToday = isDueToday(notice),
+                        onClick = { onNoticeClick(notice.noticeId) }
+                    )
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
@@ -242,7 +306,7 @@ private fun CalendarDayCell(
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                 color = when {
                     isSelected -> Color.White
-                    !calDay.isCurrentMonth -> CatchInactive
+                    !calDay.isCurrentMonth -> CatchTextCaption
                     else -> CatchTextTitle
                 }
             )
